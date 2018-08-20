@@ -404,10 +404,19 @@ handle_batches(Header, Batches,
                              },
   ok = cast_to_subscriber(Subscriber, MsgSet),
   NewPendingAcks = add_pending_acks(PendingAcks, Messages),
-  {value, ?PENDING(LastOffset, _LastMsgSize)} =
-    queue:peek_r(NewPendingAcks#pending_acks.queue),
+  NextBeginOffset = case queue:peek_r(NewPendingAcks#pending_acks.queue) of
+    {value, ?PENDING(LastOffset, _LastMsgSize)} ->
+      LastOffset + 1;
+    empty ->
+      %% flatten_batches might remove all actual messages
+      %% (if they were all before BeginOffset), leaving us
+      %% with nothing in this batch.  Since there is no way
+      %% to know how big the 'hole' is we can only bump
+      %% begin_offset with +1 and try again.
+      BeginOffset + 1
+  end,
   State1 = State0#state{ pending_acks = NewPendingAcks
-                       , begin_offset = LastOffset + 1
+                       , begin_offset = NextBeginOffset
                        },
   State2 = maybe_shrink_max_bytes(State1, MsgSet#kafka_message_set.messages),
   State = maybe_send_fetch_request(State2),
